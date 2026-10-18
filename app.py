@@ -26,15 +26,12 @@ WECHAT_TEMPLATE_ID = os.environ.get('WECHAT_TEMPLATE_ID') or ""
 BASE_URL = "https://dash.hidencloud.com"
 LOGIN_URL = f"{BASE_URL}/auth/login"
 
-# --- 代理配置 ---
 IS_PROXY      = os.environ.get('IS_PROXY', 'false').lower() == 'true'
 PROXY_SERVER  = os.environ.get('PROXY_SERVER') or "socks5://127.0.0.1:1080"
 REQUESTS_PROXIES = {"http": PROXY_SERVER, "https": PROXY_SERVER} if IS_PROXY else None
 
-# Cloudflare 整页挑战 / Turnstile 组件共用的 iframe 选择器
 CF_IFRAME_SELECTOR = 'iframe[src*="challenges.cloudflare.com"]'
 
-# 按运行平台选择 UA
 if sys.platform == 'win32':
     DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 else:
@@ -463,10 +460,17 @@ def login(page):
         
         log("🖱️ 点击登录按钮提交...")
         time.sleep(3)
+        # --- 针对登录按钮加入强制DOM点击穿透 ---
         try:
-            page.click('button[type="submit"]', timeout=10000)
+            submit_btn = page.locator('button[type="submit"], button:has-text("Login"), button:has-text("Sign in"), button:has-text("登录")').first
+            try:
+                submit_btn.click(timeout=10000)
+            except Exception:
+                log("⚠️ 常规点击疑似被拦截，执行底层 DOM 强制点击登录...")
+                submit_btn.evaluate("node => node.click()")
         except Exception:
-            page.locator('button:has-text("Sign in"), button:has-text("登录")').first.click(timeout=10000)
+            pass
+
         time.sleep(3)
         handle_cloudflare(page, timeout=240)
         nav_start = time.time()
@@ -549,15 +553,25 @@ def renew_service(page):
         handle_cloudflare(page)
         time.sleep(12) 
         log("🖱️ 准备点击 Renew 按钮...")
-        renew_btn = page.locator('button:has-text("Renew")')
-        create_btn = page.locator('button:has-text("Create Invoice")')
+        
+        # --- 增加了多语言兼容：中文代理IP可能会将按钮翻译为 续期/续费 ---
+        renew_btn = page.locator('button:has-text("Renew"), button:has-text("续期"), button:has-text("续费")').first
+        create_btn = page.locator('button:has-text("Create Invoice"), button:has-text("创建账单")').first
+        
         modal_opened = False
         for i in range(6):
             try:
                 renew_btn.wait_for(state="visible", timeout=10000)
                 renew_btn.scroll_into_view_if_needed()
                 log(f"🖱️ 第 {i+1} 次尝试点击 Renew...")
-                renew_btn.click()
+                
+                # --- 核心修复：执行底层 DOM 强制点击穿透覆盖层 ---
+                try:
+                    renew_btn.click(timeout=5000)
+                except Exception:
+                    log("⚠️ 常规点击疑似被拦截，执行底层 DOM 强制穿透点击...")
+                    renew_btn.evaluate("node => node.click()")
+                
                 time.sleep(3) 
                 page_text = page.locator("body").inner_text()
                 if "Renewal Restricted" in page_text or "can only renew" in page_text.lower():
@@ -590,7 +604,11 @@ def renew_service(page):
             log(f"🖱️ 点击 Create Invoice（第 {attempt + 1} 次）...")
             try:
                 create_btn.wait_for(state="visible", timeout=30000)
-                create_btn.click(timeout=20000)
+                try:
+                    create_btn.click(timeout=10000)
+                except Exception:
+                    log("⚠️ Create Invoice 按钮疑似被拦截，强制点击...")
+                    create_btn.evaluate("node => node.click()")
             except Exception as e:
                 log(f"⚠️ 点击 Create Invoice 失败: {e}")
                 solve_modal_turnstile(page, timeout=45)
@@ -622,9 +640,13 @@ def renew_service(page):
         handle_cloudflare(page)
 
         log("🔎 查找 Pay 按钮...")
-        pay_btn = page.locator('a:has-text("Pay"):visible, button:has-text("Pay"):visible').first
+        pay_btn = page.locator('a:has-text("Pay"):visible, button:has-text("Pay"):visible, a:has-text("支付"):visible, button:has-text("支付"):visible').first
         pay_btn.wait_for(state="visible", timeout=30000)
-        pay_btn.click()
+        try:
+            pay_btn.click(timeout=10000)
+        except Exception:
+            pay_btn.evaluate("node => node.click()")
+            
         log("✅ Pay 按钮已点击")
         time.sleep(6) 
         page.goto(SERVICE_URL, wait_until="domcontentloaded", timeout=60000) 
@@ -646,6 +668,11 @@ def main():
     with sync_playwright() as p:
         browser = None
         try:
+            if IS_PROXY:
+                log(f"⚙️ 代理已启用: {PROXY_SERVER}")
+            else:
+                log("🌐 直连模式（未使用代理）")
+            
             current_ip = get_current_ip(PROXY_SERVER)
             log(f"🎯 当前出口IP: {current_ip}")
 
