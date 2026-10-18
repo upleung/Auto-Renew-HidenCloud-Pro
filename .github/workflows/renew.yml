@@ -5,7 +5,7 @@ on:
   schedule:
     # 结合你的续期窗口，建议定在 UTC 周六 22:35 和周日 15:36
     - cron: '35 22 * * 6'
-    - cron: '36 15 * * 0'
+    #- cron: '36 15 * * 0'
 
 permissions:
   actions: write
