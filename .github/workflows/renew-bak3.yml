@@ -1,4 +1,4 @@
-name: Auto Renew HidenCloud Pro
+name: Auto Renew HidenCloud TG WeChat V3
 
 on:
   workflow_dispatch: 
